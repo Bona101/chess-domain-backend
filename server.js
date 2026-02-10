@@ -13,20 +13,20 @@ const app = express();
 
 app.use(bodyParser.json());
 app.use(cors({
-  origin: "http://localhost:5173", // your frontend
+  origin: process.env.FRONTEND_URL, // your frontend
   credentials: true
 }));
 
 app.use(session({
-  name: "session_id",
+  name: process.env.SESSION_NAME,
   secret: process.env.SESSION_SECRET,
   resave: false,
   saveUninitialized: false,
   cookie: {
     httpOnly: true,
-    secure: false, // set true in production with HTTPS
+    secure: process.env.COOKIE_SECURE, // set true in production with HTTPS
     sameSite: "lax",
-    maxAge: 1000 * 60 * 30 // 30 minutes
+    maxAge: parseInt(process.env.SESSION_MAX_AGE) // 30 minutes
   }
 }));
 
@@ -36,8 +36,12 @@ const users = [];
 
 // For testing, create one user with hashed password
 const createTestUser = async () => {
-  const hash = await bcrypt.hash("password123", 10);
-  users.push({ id: 1, email: "test@example.com", password: hash });
+    const email = process.env.TEST_EMAIL;
+    const password = process.env.TEST_PASSWORD || "";
+    const saltRounds = parseInt(process.env.SALT_ROUNDS) || 0;
+
+  const hash = await bcrypt.hash(password, saltRounds);
+  users.push({ id: 1, email, password: hash });
 };
 createTestUser();
 
@@ -98,7 +102,7 @@ app.get("/me", authMiddleware, (req, res) => {
 app.post("/logout", (req, res) => {
   req.session.destroy(err => {
     if (err) return res.status(500).send("Logout failed");
-    res.clearCookie("session_id");
+    res.clearCookie(process.env.SESSION_NAME);
     res.send("Logged out");
   });
 });
