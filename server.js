@@ -24,7 +24,7 @@ app.use(session({
   saveUninitialized: false,
   cookie: {
     httpOnly: true,
-    secure: process.env.COOKIE_SECURE, // set true in production with HTTPS
+    secure: process.env.COOKIE_SECURE === "true", // set true in production with HTTPS
     sameSite: "lax",
     maxAge: parseInt(process.env.SESSION_MAX_AGE) // 30 minutes
   }
@@ -36,7 +36,7 @@ const users = [];
 
 // For testing, create one user with hashed password
 const createTestUser = async () => {
-    const email = process.env.TEST_EMAIL;
+    const email = process.env.TEST_EMAIL || "";
     const password = process.env.TEST_PASSWORD || "";
     const saltRounds = parseInt(process.env.SALT_ROUNDS) || 0;
 
@@ -70,6 +70,7 @@ app.get("/dashboard", authMiddleware, (req, res) => {
 
 app.post("/signup", async (req, res) => {
   const { email, password } = req.body;
+  const saltRounds = parseInt(process.env.SALT_ROUNDS) || 0;
 
   // basic validation
   if (!email || !password) return res.status(400).send("Email and password required");
@@ -79,7 +80,7 @@ app.post("/signup", async (req, res) => {
   if (existingUser) return res.status(400).send("User already exists");
 
   // hash password
-  const hashedPassword = await bcrypt.hash(password, 10);
+  const hashedPassword = await bcrypt.hash(password, saltRounds);
 
   // create new user
   const newUser = { id: users.length + 1, email, password: hashedPassword };
