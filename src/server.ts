@@ -1,4 +1,4 @@
-import express, { Request, Response, NextFunction } from "express";
+import express, { Request, Router, Response, NextFunction } from "express";
 import session from "express-session";
 import bodyParser from "body-parser";
 import cors from "cors";
@@ -7,6 +7,7 @@ import bcrypt from "bcrypt";
 import pkg from "pg";
 import { OAuth2Client } from 'google-auth-library';
 import crypto from "crypto";
+import nodemailer from 'nodemailer';
 
 
 // 1. Tell TypeScript about your session data
@@ -38,6 +39,7 @@ async function getGoogleUser(code: string) {
 }
 
 const { Pool } = pkg;
+const router = Router();
 
 export const pool = new Pool({
     user: process.env.DB_USER,
@@ -152,7 +154,7 @@ app.post("/auth/google", async (req, res) => {
 
         // Start Session
         req.session.userId = user.id;
-         res.json({
+        res.json({
             message: "Logged in successfully",
             user: {
                 id: user.id,
@@ -301,6 +303,87 @@ app.get("/me", authMiddleware, async (req, res) => {
         authenticated: true,
         user: result.rows[0]
     });
+});
+
+app.post("/forgot-password", async (req, res) => {
+    const { email } = req.body;
+    const token = crypto.randomBytes(32).toString('hex');
+    const expiry = new Date(Date.now() + 3600000); // 1 hour from now
+
+    try {
+        const result = await pool.query(
+            'UPDATE users SET reset_token = $1, reset_token_expiry = $2 WHERE email = $3',
+            [token, expiry, email]
+        );
+
+        if (result.rowCount === 0) return res.status(404).send("User not found.");
+
+        // Here you would send the email with the link:
+        // http://localhost:5173/reset-password?token=${token}
+
+
+        // 1. Create a transporter
+        const transporter = nodemailer.createTransport({
+            service: 'gmail',
+            auth: {
+                user: process.env.EMAIL_USER,
+                pass: process.env.EMAIL_APP_PASSWORD,
+            },
+        });
+
+        // 2. Define the email content
+        const resetLink = `http://localhost:5173/reset-password/${token}`;
+
+        const mailOptions = {
+            from: process.env.EMAIL_USER,
+            to: email, // The email from req.body
+            subject: 'Password Reset Request',
+            html: `
+        <p>You requested a password reset.</p>
+        <p>Click the link below to set a new password. This link expires in 1 hour:</p>
+        <a href="${resetLink}">${resetLink}</a>
+    `,
+        };
+
+        // 3. Send it
+        try {
+            await transporter.sendMail(mailOptions);
+            res.json({ message: "Check your email for the reset link." });
+        } catch (error) {
+            console.error("Email error:", error);
+            res.status(500).send("Error sending email.");
+        }
+
+        res.json({ message: "Reset link sent to email.", token });
+    } catch (err) {
+        res.status(500).send("Server error.");
+    }
+});
+
+app.post("/reset-password", async (req, res) => {
+    const { email, token, newPassword } = req.body;
+
+    try {
+        // Find user where token matches AND it's not expired
+        const user = await pool.query(
+            'SELECT * FROM users WHERE email = $1 AND reset_token = $2 AND reset_token_expiry > NOW()',
+            [email, token]
+        );
+
+        if (user.rows.length === 0) return res.status(400).send("Invalid or expired token.");
+
+        const hashedPassword = await bcrypt.hash(newPassword, 10);
+
+        // Update password and wipe token so it can't be used again
+        await pool.query(
+            'UPDATE users SET password = $1, reset_token = NULL, reset_token_expiry = NULL WHERE id = $2',
+            [hashedPassword, user.rows[0].id]
+        );
+
+        res.send("Password updated successfully.");
+    } catch (err) {
+        res.status(500).send("Server error.");
+    }
 });
 
 
